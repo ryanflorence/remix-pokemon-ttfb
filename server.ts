@@ -8,6 +8,12 @@ if (process.env.NODE_ENV === "development") {
 
 export const onRequest = createPagesFunctionHandler({
   build,
-  getLoadContext: (context) => ({ env: context.env }),
+  getLoadContext: context => {
+    const sql = (query: string) => {
+      return context.env.DB.prepare(query).all();
+    };
+
+    return { env: context.env, sql };
+  },
   mode: build.mode,
 });

@@ -1,40 +1,50 @@
-/**
- * By default, Remix will handle generating the HTTP Response for you.
- * You are free to delete this file if you'd like to, but if you ever want it revealed again, you can run `npx remix reveal` ✨
- * For more information, see https://remix.run/file-conventions/entry.server
- */
-
-import type { AppLoadContext, EntryContext } from "@remix-run/cloudflare";
+import type { EntryContext } from "@remix-run/cloudflare";
 import { RemixServer } from "@remix-run/react";
 import isbot from "isbot";
 import { renderToReadableStream } from "react-dom/server";
 
-export default async function handleRequest(
+const ABORT_DELAY = 5000;
+
+const handleRequest = async (
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext
-) {
-  const body = await renderToReadableStream(
-    <RemixServer context={remixContext} url={request.url} />,
+) => {
+  let didError = false;
+
+  let start = Date.now();
+  const stream = await renderToReadableStream(
+    <RemixServer
+      context={remixContext}
+      url={request.url}
+      abortDelay={ABORT_DELAY}
+    />,
     {
-      signal: request.signal,
-      onError(error: unknown) {
-        // Log streaming rendering errors from inside the shell
+      onError: (error: unknown) => {
+        console.log("Caught an error");
+        didError = true;
         console.error(error);
-        responseStatusCode = 500;
+
+        // You can also log crash/error report
       },
-    }
+      signal: AbortSignal.timeout(ABORT_DELAY),
+    },
   );
 
   if (isbot(request.headers.get("user-agent"))) {
-    await body.allReady;
+    await stream.allReady;
   }
 
+  let time = Date.now() - start;
+  responseHeaders.append("Server-Timing", `shell-render;dur=${time}`);
+  responseHeaders.set("Transfer-Encoding", "chunked");
   responseHeaders.set("Content-Type", "text/html");
-  return new Response(body, {
+
+  return new Response(stream, {
     headers: responseHeaders,
-    status: responseStatusCode,
+    status: didError ? 500 : responseStatusCode,
   });
-}
+};
+
+export default handleRequest;
